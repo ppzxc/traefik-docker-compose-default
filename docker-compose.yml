@@ -1,0 +1,85 @@
+version: "3.8"
+
+services:
+  traefik:
+    env_file: ./env.traefik
+    image: traefik:${VERSION}
+    container_name: traefik
+    restart: always
+    environment:
+      - TZ=Asia/Seoul
+    command:
+      - "--log.level=info"
+      - "--accesslog=true"
+        #- "--log.filepath=/opt/traefik/default.log"
+        #- "--log.format=json"
+        #- "--accesslog.filepath=/opt/traefik/access.log"
+        #- "--accesslog.format=json"
+        #
+     # - "--metrics=true"
+      - "--metrics.prometheus=true"
+      #- "--metrics.prometheus.entryPoint=metrics"
+      #- "--metrics.prometheus.addEntryPointsLabels=true"
+      #- "--metrics.prometheus.addServicesLabels=true"
+      #- "--entryPoints.metrics.address=:8085"
+      #- "--metrics.prometheus.buckets=0.100000, 0.300000, 1.200000, 5.000000"
+
+      - "--api.insecure=true"
+      - "--api.dashboard=true"
+      - "--api.debug=true"
+      - "--providers.docker=true"
+      - "--providers.docker.exposedbydefault=false"
+      #- "--providers.file.directory=/traefik/traefik.toml"
+
+      - "--entrypoints.entrypoint-http.address=:80"
+      - "--entrypoints.entrypoint-https.address=:443"
+
+      - "--certificatesresolvers.ingress-cert.acme.httpchallenge=true"
+      - "--certificatesresolvers.ingress-cert.acme.httpchallenge.entrypoint=entrypoint-http"
+      - "--certificatesresolvers.ingress-cert.acme.caServer=https://acme-staging-v02.api.letsencrypt.org/directory"
+      - "--certificatesresolvers.ingress-cert.acme.email=${ACME_EMAIL}"
+      - "--certificatesresolvers.ingress-cert.acme.storage=/letsencrypt/acme.json"
+
+    ports:
+      - 80:80
+      - 443:443
+
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./htpasswd:/htpasswd
+      - ./letsencrypt:/letsencrypt
+      - /etc/localtime:/etc/localtime:ro
+
+    networks:
+      - ingress
+      - monitor-network
+      - tinode-network
+
+    labels:
+      - "traefik.enable=true"
+      - "traefik.docker.network=ingress"
+      - "traefik.http.services.dashboard-traefik.loadbalancer.server.port=8080"
+
+      - "traefik.http.routers.unsecured-traefik.rule=Host(`traefik.${DOMAIN}`)"
+      - "traefik.http.routers.unsecured-traefik.entrypoints=entrypoint-http"
+      - "traefik.http.routers.unsecured-traefik.middlewares=secured-traefik-chain"
+
+      - "traefik.http.routers.secured-traefik.rule=Host(`traefik.${DOMAIN}`)"
+      - "traefik.http.routers.secured-traefik.entrypoints=entrypoint-https"
+      - "traefik.http.routers.secured-traefik.service=api@internal"
+      - "traefik.http.routers.secured-traefik.tls=true"
+      - "traefik.http.routers.secured-traefik.tls.certresolver=ingress-cert"
+      - "traefik.http.routers.secured-traefik.middlewares=secured-traefik-chain"
+
+      - "traefik.http.middlewares.secured-traefik-chain.chain.middlewares=ipwhitelist,basicauth-traefik"
+      - "traefik.http.middlewares.ipwhitelist.ipwhitelist.sourcerange=${WHITELISTIP}"
+      - "traefik.http.middlewares.basicauth-traefik.basicauth.usersfile=/htpasswd"
+      - "traefik.http.middlewares.redirect-secured.redirectscheme.scheme=https"
+
+networks:
+  ingress:
+    external: true
+  monitor-network:
+    external: true
+  tinode-network:
+    external: true
